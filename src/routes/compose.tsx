@@ -41,6 +41,17 @@ export function createComposeRoutes(deps: ComposeRoutesDeps = {}): Hono<AppEnv> 
   const reader = deps.reader ?? createPdsReader();
   const composeRoute = new Hono<AppEnv>();
 
+  // 検証エラー・書き込み失敗時の再表示は入力された本文をエコーバックするため、
+  // ブラウザ・中間経路にキャッシュさせない（要件7.2の非キャッシュ方針）。
+  composeRoute.use("/compose", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
+  composeRoute.use("/compose/*", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
+
   composeRoute.get("/compose", requireAuth(), (c) => {
     const session = c.get("session");
     const csrfToken = generateCsrfToken(session.csrfSecret);

@@ -136,6 +136,21 @@ describe("compose routes", () => {
       expect(createSpoilerPost).not.toHaveBeenCalled();
     });
 
+    it("エラー再表示は本文をエコーバックするためno-storeを付与する", async () => {
+      const app = buildApp(db);
+      const csrfToken = generateCsrfToken(session.csrfSecret);
+      const res = await app.request("/compose", {
+        method: "POST",
+        headers: { ...cookieHeader(session), "content-type": "application/x-www-form-urlencoded" },
+        body: validBody(csrfToken, "ネタバレ本文をエコーバックするケース"),
+      });
+      // createSpoilerPost はデフォルトモックの挙動に依存せず、ヘッダのみ検証する。
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+
+      const getRes = await app.request("/compose", { headers: cookieHeader(session) });
+      expect(getRes.headers.get("Cache-Control")).toBe("no-store");
+    });
+
     it("空白のみの本文は拒否され、入力値をフォームに保持する", async () => {
       const app = buildApp(db);
       const csrfToken = generateCsrfToken(session.csrfSecret);
