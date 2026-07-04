@@ -97,12 +97,6 @@ flowchart LR
 - 運営者への連絡手段は、skyseal公式のBlueskyアカウントとする（アカウントは公開前に作成する）。
 - 文面のドラフトは [terms-and-privacy.md](./terms-and-privacy.md) を参照。
 
-## 5. UI共通方針
-
-- スタイルは自前CSSのみで構成する。CSPが `style-src 'self'` のため（[architecture.md 5.](./architecture.md)）、外部CDNのCSSフレームワーク・Webフォントは使わず、フォントはシステムフォントスタックとする。
-- **ダークモードに対応する。** `prefers-color-scheme` に追従し、配色はCSSカスタムプロパティ（デザイントークン）で定義して全画面で共有する。手動切り替えUIは設けない。
-- 専用ページの本文は長文の読みやすさを優先する（適切な行長・行間、`white-space: pre-wrap`）。
-
 ## 4. 投稿・削除処理の詳細
 
 ### 4.1 投稿作成（`POST /compose`）
@@ -123,3 +117,9 @@ flowchart LR
 3. 案内投稿が存在し検証に一致すれば applyWrites で2件を一括削除、案内投稿が存在しない・検証に一致しない場合は本文レコードのみ削除する（要件6.8）。
 4. applyWrites には `swapCommit`（手順1〜2で観測したコミットCID）を指定し、確認と削除の間にリポジトリが変化していた場合は失敗させて手順1からやり直す（TOCTOU対策）。
 5. `/manage/deleted` へリダイレクトする。
+
+## 5. UI共通方針
+
+- スタイルは自前CSSのみで構成する。CSPが `style-src 'self'` のため（[architecture.md 5.](./architecture.md)）、外部CDNのCSSフレームワーク・Webフォントは使わず、フォントはシステムフォントスタックとする。
+- **ダークモードに対応する。** `prefers-color-scheme` に追従し、配色はCSSカスタムプロパティ（デザイントークン）で定義して全画面で共有する。手動切り替えUIは設けない。
+- 専用ページの本文は長文の読みやすさを優先する（適切な行長・行間、`white-space: pre-wrap`）。
