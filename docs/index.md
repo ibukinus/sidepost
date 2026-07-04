@@ -2,9 +2,9 @@
 okf_version: "0.1"
 ---
 
-# sidepost ドキュメント
+# skyseal ドキュメント
 
-Bluesky（AT Protocol）上でネタバレ本文を通常投稿から分離するサービス「sidepost」のドキュメントバンドル。
+Bluesky（AT Protocol）上でネタバレ本文を通常投稿から分離するサービス「skyseal」のドキュメントバンドル。
 
 このディレクトリは [OKF (Open Knowledge Format) v0.1](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf) に準拠する。
 運用ルールは [文書管理ルール](./guides/documentation-rules.md) を参照。

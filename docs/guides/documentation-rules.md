@@ -1,9 +1,9 @@
 ---
 type: Guide
 title: 文書管理ルール
-description: sidepostにおける文書の置き場所、書式（OKF）、更新手順を定める。
+description: skysealにおける文書の置き場所、書式（OKF）、更新手順を定める。
 tags: [documentation, rules]
-timestamp: 2026-07-04T17:00:00+09:00
+timestamp: 2026-07-04T21:37:00+09:00
 ---
 
 # 文書管理ルール

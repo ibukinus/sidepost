@@ -1,4 +1,4 @@
-# sidepost
+# skyseal
 
 Bluesky（AT Protocol）上でネタバレ本文を通常投稿から分離するサービス。ネタバレ本文は投稿者自身のPDSに独自レコードとして保存し、Blueskyには固定文言と専用URLのみを投稿する。
 

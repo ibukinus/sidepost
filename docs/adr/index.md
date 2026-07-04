@@ -5,3 +5,4 @@
 
 - [0001-adopt-okf-docs-structure.md](./0001-adopt-okf-docs-structure.md) — 文書管理にOKF準拠のdocs-as-code構成を採用する
 - [0002-fetch-spoiler-via-service-api.md](./0002-fetch-spoiler-via-service-api.md) — 専用ページの本文取得はサービスAPIを経由する
+- [0003-rename-service-to-skyseal.md](./0003-rename-service-to-skyseal.md) — サービス名をskysealとし、ドメイン・NSIDを確定する
