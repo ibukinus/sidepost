@@ -7,7 +7,9 @@ import { loadConfig } from "./config/index.js";
 import { openDatabase } from "./db/index.js";
 import { createRateLimiter } from "./middleware/rate-limit.js";
 import { createContentApi } from "./routes/content-api.js";
+import { createDidResolver } from "./services/did.js";
 import { createOAuthClient } from "./services/oauth.js";
+import { createPdsReader } from "./services/pds-read.js";
 import { createAppSession, SESSION_COOKIE_NAME } from "./services/session.js";
 
 // 実在するES256 (EC P-256) の秘密鍵JWK（テスト専用に生成した固定値）。
@@ -36,13 +38,18 @@ describe("createApp", () => {
     });
     const db = openDatabase(path.join(tmpDir, "skyseal.db"));
     const oauthClient = await createOAuthClient(config, db);
-    const contentApi = createContentApi(config);
+    const didResolver = createDidResolver();
+    const contentApi = createContentApi(config, { didResolver });
+    const pdsReader = createPdsReader({ didResolver });
     const rateLimiter = createRateLimiter();
     cleanups.push(() => {
       contentApi.stop();
       rateLimiter.stop();
     });
-    return { app: createApp({ config, db, oauthClient, contentApi, rateLimiter }), db };
+    return {
+      app: createApp({ config, db, oauthClient, contentApi, rateLimiter, pdsReader }),
+      db,
+    };
   }
 
   beforeEach(() => {

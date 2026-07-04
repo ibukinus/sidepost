@@ -1,14 +1,18 @@
 import type { Agent } from "@atproto/api";
-import { ComAtprotoRepoApplyWrites, ComAtprotoRepoGetRecord } from "@atproto/api";
+import { ComAtprotoRepoApplyWrites } from "@atproto/api";
 import { buildDedicatedUrl } from "../lib/at-uri.js";
 import { isValidRecordKey } from "../lib/atproto-syntax.js";
 import { validateSpoilerRecord } from "./content.js";
+import type { PdsReader } from "./pds-read.js";
+import { PdsRecordNotFoundError } from "./pds-read.js";
 import { buildAnnouncementText } from "./spoiler-post.js";
 
 /**
  * 投稿管理・削除の中核処理（screens.md 3.5・3.6・4.2、lexicon.md 2.）。
  *
- * PDSアクセスは `RepoAgent`（`@atproto/api` の `Agent` の必要最小限の部分集合）経由で行う。
+ * 読み取り（一覧・レコード取得・最新コミット取得）は認証なしの {@link PdsReader}
+ * 経由で行う。書き込み（applyWrites）のみ認証付きの {@link RepoWriter} を使う
+ * （oauth-session.md 2.: 読み取りに `rpc:` スコープを要求しない方針）。
  * 本文はレスポンスの一覧表示用抜粋以外は保持・ログ出力しない（要件7.1・7.2）。
  */
 
@@ -18,38 +22,16 @@ export const LIST_PAGE_SIZE = 50;
 export const EXCERPT_MAX_CHARS = 50;
 
 /**
- * `Agent`（`@atproto/api`）の必要最小限の部分集合。テストではこの形に沿った
- * フェイクを渡せる。本番では {@link toRepoAgent} で実際の `Agent` を適合させる。
+ * 書き込み（`applyWrites`）専用の抽象。認証付きOAuth Agentを使うのは書き込みのみ。
+ * テストではこの形に沿ったフェイクを渡せる。本番では {@link toRepoWriter} で
+ * 実際の `Agent` を適合させる。
  */
-export interface RepoAgent {
-  com: {
-    atproto: {
-      repo: {
-        listRecords(params: {
-          repo: string;
-          collection: string;
-          limit?: number;
-          cursor?: string;
-          reverse?: boolean;
-        }): Promise<{
-          data: { cursor?: string; records: { uri: string; cid: string; value: unknown }[] };
-        }>;
-        getRecord(params: {
-          repo: string;
-          collection: string;
-          rkey: string;
-        }): Promise<{ data: { uri: string; cid?: string; value: unknown } }>;
-        applyWrites(input: {
-          repo: string;
-          writes: RepoDeleteWrite[];
-          swapCommit?: string;
-        }): Promise<{ data: unknown }>;
-      };
-      sync: {
-        getLatestCommit(params: { did: string }): Promise<{ data: { cid: string; rev: string } }>;
-      };
-    };
-  };
+export interface RepoWriter {
+  applyWrites(input: {
+    repo: string;
+    writes: RepoDeleteWrite[];
+    swapCommit?: string;
+  }): Promise<void>;
 }
 
 export interface RepoDeleteWrite {
@@ -58,26 +40,17 @@ export interface RepoDeleteWrite {
   rkey: string;
 }
 
-/** 実際の `Agent`（`getAgentForDid` の戻り値）を {@link RepoAgent} に適合させる。 */
-export function toRepoAgent(agent: Agent): RepoAgent {
+/** 実際の `Agent`（`getAgentForDid` の戻り値）を {@link RepoWriter} に適合させる。 */
+export function toRepoWriter(agent: Agent): RepoWriter {
   return {
-    com: {
-      atproto: {
-        repo: {
-          listRecords: (params) => agent.com.atproto.repo.listRecords(params),
-          getRecord: (params) => agent.com.atproto.repo.getRecord(params),
-          applyWrites: (input) => agent.com.atproto.repo.applyWrites(input),
-        },
-        sync: {
-          getLatestCommit: (params) => agent.com.atproto.sync.getLatestCommit(params),
-        },
-      },
+    applyWrites: async (input) => {
+      await agent.com.atproto.repo.applyWrites(input);
     },
   };
 }
 
 function isRecordNotFound(err: unknown): boolean {
-  return err instanceof ComAtprotoRepoGetRecord.RecordNotFoundError;
+  return err instanceof PdsRecordNotFoundError;
 }
 
 function isInvalidSwap(err: unknown): boolean {
@@ -122,29 +95,21 @@ export interface SpoilerListPage {
  * 形式が不正なレコード（他アプリ等が同一コレクションに書き込んだ不正な値）は一覧から除外する。
  */
 export async function listSpoilerPosts(
-  agent: RepoAgent,
+  reader: PdsReader,
   did: string,
   cursor?: string,
 ): Promise<SpoilerListPage> {
-  const listParams: {
-    repo: string;
-    collection: string;
-    limit: number;
-    reverse: boolean;
-    cursor?: string;
-  } = {
-    repo: did,
-    collection: SPOILER_COLLECTION,
+  const listOptions: { limit: number; reverse: boolean; cursor?: string } = {
     limit: LIST_PAGE_SIZE,
     reverse: true,
   };
   if (cursor !== undefined) {
-    listParams.cursor = cursor;
+    listOptions.cursor = cursor;
   }
-  const res = await agent.com.atproto.repo.listRecords(listParams);
+  const res = await reader.listRecords(did, SPOILER_COLLECTION, listOptions);
 
   const items: SpoilerListItem[] = [];
-  for (const record of res.data.records) {
+  for (const record of res.records) {
     const rkey = extractRkeyFromUri(record.uri);
     const validated = validateSpoilerRecord(record.value);
     if (rkey !== null && isValidRecordKey(rkey) && validated !== null) {
@@ -157,8 +122,8 @@ export async function listSpoilerPosts(
   }
 
   const page: SpoilerListPage = { items };
-  if (res.data.cursor !== undefined) {
-    page.nextCursor = res.data.cursor;
+  if (res.cursor !== undefined) {
+    page.nextCursor = res.cursor;
   }
   return page;
 }
@@ -217,7 +182,8 @@ export interface DeleteSpoilerPostParams {
  *    競合時は失敗として返す（自動リトライしない）。
  */
 export async function deleteSpoilerPost(
-  agent: RepoAgent,
+  reader: PdsReader,
+  writer: RepoWriter,
   params: DeleteSpoilerPostParams,
 ): Promise<DeleteOutcome> {
   const { did, rkey, origin } = params;
@@ -232,20 +198,15 @@ export async function deleteSpoilerPost(
   // 読み取り自体の間に起きた変化を見逃す（チェック自体が無意味になる）ため、必ず先に取得する。
   let swapCommit: string;
   try {
-    const commit = await agent.com.atproto.sync.getLatestCommit({ did });
-    swapCommit = commit.data.cid;
+    const commit = await reader.getLatestCommit(did);
+    swapCommit = commit.cid;
   } catch {
     return { ok: false, reason: "pds-error" };
   }
 
   let spoilerValue: unknown;
   try {
-    const res = await agent.com.atproto.repo.getRecord({
-      repo: did,
-      collection: SPOILER_COLLECTION,
-      rkey,
-    });
-    spoilerValue = res.data.value;
+    spoilerValue = await reader.getRecord(did, SPOILER_COLLECTION, rkey);
   } catch (err) {
     if (isRecordNotFound(err)) {
       // すでに削除済み（screens.md 4.2 手順1）。
@@ -260,12 +221,8 @@ export async function deleteSpoilerPost(
   let announcementMatched = false;
   if (announcementRkey !== null) {
     try {
-      const res = await agent.com.atproto.repo.getRecord({
-        repo: did,
-        collection: ANNOUNCEMENT_COLLECTION,
-        rkey: announcementRkey,
-      });
-      announcementMatched = isMatchingAnnouncement(res.data.value, origin, did, rkey);
+      const value = await reader.getRecord(did, ANNOUNCEMENT_COLLECTION, announcementRkey);
+      announcementMatched = isMatchingAnnouncement(value, origin, did, rkey);
     } catch (err) {
       if (!isRecordNotFound(err)) {
         // 取得不可（ネットワーク障害等、存在しないと断定できないエラー）の場合は、
@@ -291,7 +248,7 @@ export async function deleteSpoilerPost(
   }
 
   try {
-    await agent.com.atproto.repo.applyWrites({ repo: did, writes, swapCommit });
+    await writer.applyWrites({ repo: did, writes, swapCommit });
   } catch (err) {
     if (isInvalidSwap(err)) {
       // TOCTOU競合。自動リトライしない（AGENTS.md: フォールバック禁止）。

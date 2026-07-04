@@ -1,13 +1,14 @@
-import { ComAtprotoRepoApplyWrites, ComAtprotoRepoGetRecord, XRPCError } from "@atproto/api";
-import type { NodeOAuthClient } from "@atproto/oauth-client-node";
+import { ComAtprotoRepoApplyWrites, XRPCError } from "@atproto/api";
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { jsxRenderer } from "hono/jsx-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../db/index.js";
 import { CSRF_FIELD_NAME, generateCsrfToken } from "../middleware/csrf.js";
-import type { RepoAgent } from "../services/manage.js";
+import type { RepoWriter } from "../services/manage.js";
 import { SessionRevokedError } from "../services/oauth.js";
+import type { PdsReader } from "../services/pds-read.js";
+import { PdsRecordNotFoundError } from "../services/pds-read.js";
 import { createAppSession, SESSION_COOKIE_NAME } from "../services/session.js";
 import type { AppEnv } from "../types.js";
 import { Layout } from "../views/layout.js";
@@ -17,22 +18,27 @@ import { createManageRoutes } from "./manage.js";
 const DID = "did:plc:abcdefghijklmnopqrstuvwx";
 const ORIGIN = "https://skyseal.example.com";
 
-function fakeAgent(overrides: Partial<RepoAgent["com"]["atproto"]> = {}): RepoAgent {
+function invalidSwap(): ComAtprotoRepoApplyWrites.InvalidSwapError {
+  return new ComAtprotoRepoApplyWrites.InvalidSwapError(
+    new XRPCError(409, "InvalidSwap", "Commit was too old"),
+  );
+}
+
+/** 認証なし読み取り（PdsReader）のフェイク。既定は空一覧・レコード不在。 */
+function fakeReader(overrides: Partial<PdsReader> = {}): PdsReader {
   return {
-    com: {
-      atproto: {
-        repo: {
-          listRecords: vi.fn().mockResolvedValue({ data: { records: [] } }),
-          getRecord: vi.fn(),
-          applyWrites: vi.fn().mockResolvedValue({ data: {} }),
-          ...overrides.repo,
-        },
-        sync: {
-          getLatestCommit: vi.fn().mockResolvedValue({ data: { cid: "bafycommit", rev: "1" } }),
-          ...overrides.sync,
-        },
-      },
-    },
+    listRecords: vi.fn().mockResolvedValue({ records: [] }),
+    getRecord: vi.fn().mockRejectedValue(new PdsRecordNotFoundError()),
+    getLatestCommit: vi.fn().mockResolvedValue({ cid: "bafycommit", rev: "1" }),
+    ...overrides,
+  };
+}
+
+/** 認証付き書き込み（RepoWriter）のフェイク。 */
+function fakeWriter(overrides: Partial<RepoWriter> = {}): RepoWriter {
+  return {
+    applyWrites: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
   };
 }
 
@@ -52,7 +58,7 @@ describe("manage routes", () => {
     app.use("*", async (c, next) => {
       c.set("db", db);
       c.set("config", { origin: ORIGIN } as AppEnv["Variables"]["config"]);
-      c.set("oauthClient", {} as NodeOAuthClient);
+      c.set("oauthClient", {} as never);
       await next();
     });
     app.use(
@@ -70,36 +76,30 @@ describe("manage routes", () => {
 
   describe("GET /manage", () => {
     it("未ログインは / へリダイレクトする", async () => {
-      const app = buildApp({ getAgent: vi.fn() });
+      const app = buildApp({ reader: fakeReader(), getWriter: vi.fn() });
       const res = await app.request("/manage");
       expect(res.status).toBe(302);
       expect(res.headers.get("location")).toBe("/");
     });
 
-    it("一覧を200で描画する", async () => {
+    it("一覧を200で描画する（認証なしreaderのlistRecordsを使う）", async () => {
       const { header } = loginCookie();
-      const agent = fakeAgent({
-        repo: {
-          listRecords: vi.fn().mockResolvedValue({
-            data: {
-              records: [
-                {
-                  uri: `at://${DID}/jp.mp0.skyseal.post/rkey1`,
-                  cid: "cid1",
-                  value: {
-                    $type: "jp.mp0.skyseal.post",
-                    text: "本文の一部",
-                    createdAt: "2026-07-01T00:00:00.000Z",
-                    announcementRkey: "announce1",
-                  },
-                },
-              ],
+      const listRecords = vi.fn().mockResolvedValue({
+        records: [
+          {
+            uri: `at://${DID}/jp.mp0.skyseal.post/rkey1`,
+            cid: "cid1",
+            value: {
+              $type: "jp.mp0.skyseal.post",
+              text: "本文の一部",
+              createdAt: "2026-07-01T00:00:00.000Z",
+              announcementRkey: "announce1",
             },
-          }),
-        } as never,
+          },
+        ],
       });
-      const getAgent = vi.fn().mockResolvedValue(agent);
-      const app = buildApp({ getAgent });
+      const getWriter = vi.fn();
+      const app = buildApp({ reader: fakeReader({ listRecords }), getWriter });
 
       const res = await app.request("/manage", { headers: header });
 
@@ -107,26 +107,19 @@ describe("manage routes", () => {
       const html = await res.text();
       expect(html).toContain("本文の一部");
       expect(html).toContain(`/p/${DID}/rkey1`);
-      expect(getAgent).toHaveBeenCalledWith(expect.anything(), db, DID);
-    });
-
-    it("SessionRevokedErrorなら / へリダイレクトする", async () => {
-      const { header } = loginCookie();
-      const getAgent = vi.fn().mockRejectedValue(new SessionRevokedError());
-      const app = buildApp({ getAgent });
-
-      const res = await app.request("/manage", { headers: header });
-
-      expect(res.status).toBe(302);
-      expect(res.headers.get("location")).toBe("/");
+      // 一覧はセッションのDIDで、認証なしreader経由。
+      expect(listRecords).toHaveBeenCalledWith(DID, "jp.mp0.skyseal.post", {
+        limit: 50,
+        reverse: true,
+      });
+      // 読み取りに認証付きAgentは取得しない。
+      expect(getWriter).not.toHaveBeenCalled();
     });
 
     it("一覧取得に失敗したら明確なエラー文言を表示する（本文は含めない）", async () => {
       const { header } = loginCookie();
-      const agent = fakeAgent({
-        repo: { listRecords: vi.fn().mockRejectedValue(new Error("boom")) } as never,
-      });
-      const app = buildApp({ getAgent: vi.fn().mockResolvedValue(agent) });
+      const listRecords = vi.fn().mockRejectedValue(new Error("boom"));
+      const app = buildApp({ reader: fakeReader({ listRecords }), getWriter: vi.fn() });
 
       const res = await app.request("/manage", { headers: header });
 
@@ -137,9 +130,18 @@ describe("manage routes", () => {
   });
 
   describe("POST /manage/delete", () => {
+    function spoilerRecordValue() {
+      return {
+        $type: "jp.mp0.skyseal.post",
+        text: "本文",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        announcementRkey: "announce1",
+      };
+    }
+
     it("CSRFトークンが無ければ403を返す", async () => {
       const { header } = loginCookie();
-      const app = buildApp({ getAgent: vi.fn() });
+      const app = buildApp({ reader: fakeReader(), getWriter: vi.fn() });
 
       const res = await app.request("/manage/delete", {
         method: "POST",
@@ -152,23 +154,15 @@ describe("manage routes", () => {
 
     it("成功時は303で /manage/deleted へPRGする", async () => {
       const { session, header } = loginCookie();
-      const applyWrites = vi.fn().mockResolvedValue({ data: {} });
-      const agent = fakeAgent({
-        repo: {
-          getRecord: vi.fn().mockResolvedValue({
-            data: {
-              value: {
-                $type: "jp.mp0.skyseal.post",
-                text: "本文",
-                createdAt: "2026-07-01T00:00:00.000Z",
-                announcementRkey: "announce1",
-              },
-            },
-          }),
-          applyWrites,
-        } as never,
+      const getRecord = vi
+        .fn()
+        .mockResolvedValueOnce(spoilerRecordValue())
+        .mockRejectedValueOnce(new PdsRecordNotFoundError());
+      const applyWrites = vi.fn().mockResolvedValue(undefined);
+      const app = buildApp({
+        reader: fakeReader({ getRecord }),
+        getWriter: vi.fn().mockResolvedValue(fakeWriter({ applyWrites })),
       });
-      const app = buildApp({ getAgent: vi.fn().mockResolvedValue(agent) });
       const token = generateCsrfToken(session.csrfSecret);
 
       const res = await app.request("/manage/delete", {
@@ -184,20 +178,13 @@ describe("manage routes", () => {
 
     it("自分のDIDのリポジトリのみを操作する（リクエストにDIDフィールドがあっても無視する）", async () => {
       const { session, header } = loginCookie();
-      const getRecord = vi.fn().mockResolvedValue({
-        data: {
-          value: {
-            $type: "jp.mp0.skyseal.post",
-            text: "本文",
-            createdAt: "2026-07-01T00:00:00.000Z",
-            announcementRkey: "announce1",
-          },
-        },
-      });
-      const applyWrites = vi.fn().mockResolvedValue({ data: {} });
-      const agent = fakeAgent({ repo: { getRecord, applyWrites } as never });
-      const getAgent = vi.fn().mockResolvedValue(agent);
-      const app = buildApp({ getAgent });
+      const getRecord = vi
+        .fn()
+        .mockResolvedValueOnce(spoilerRecordValue())
+        .mockRejectedValueOnce(new PdsRecordNotFoundError());
+      const applyWrites = vi.fn().mockResolvedValue(undefined);
+      const getWriter = vi.fn().mockResolvedValue(fakeWriter({ applyWrites }));
+      const app = buildApp({ reader: fakeReader({ getRecord }), getWriter });
       const token = generateCsrfToken(session.csrfSecret);
 
       await app.request("/manage/delete", {
@@ -211,10 +198,10 @@ describe("manage routes", () => {
         redirect: "manual",
       });
 
-      expect(getAgent).toHaveBeenCalledWith(expect.anything(), db, DID);
-      expect(getRecord).toHaveBeenCalledWith(
-        expect.objectContaining({ repo: DID, collection: "jp.mp0.skyseal.post", rkey: "rkey1" }),
-      );
+      // 書き込み用AgentはセッションのDIDでのみ取得する。
+      expect(getWriter).toHaveBeenCalledWith(expect.anything(), db, DID);
+      // 読み取りもセッションのDIDに対して認証なしで行う。
+      expect(getRecord).toHaveBeenCalledWith(DID, "jp.mp0.skyseal.post", "rkey1");
       expect(applyWrites).toHaveBeenCalledWith(expect.objectContaining({ repo: DID }));
     });
 
@@ -222,7 +209,8 @@ describe("manage routes", () => {
       const { session, header } = loginCookie();
       const getRecord = vi.fn();
       const app = buildApp({
-        getAgent: vi.fn().mockResolvedValue(fakeAgent({ repo: { getRecord } as never })),
+        reader: fakeReader({ getRecord }),
+        getWriter: vi.fn().mockResolvedValue(fakeWriter()),
       });
       const token = generateCsrfToken(session.csrfSecret);
 
@@ -242,32 +230,12 @@ describe("manage routes", () => {
       const { session, header } = loginCookie();
       const getRecord = vi
         .fn()
-        .mockResolvedValueOnce({
-          data: {
-            value: {
-              $type: "jp.mp0.skyseal.post",
-              text: "本文",
-              createdAt: "2026-07-01T00:00:00.000Z",
-              announcementRkey: "announce1",
-            },
-          },
-        })
-        .mockRejectedValueOnce(
-          new ComAtprotoRepoGetRecord.RecordNotFoundError(
-            new XRPCError(400, "RecordNotFound", "Could not locate record"),
-          ),
-        );
-      const applyWrites = vi
-        .fn()
-        .mockRejectedValue(
-          new ComAtprotoRepoApplyWrites.InvalidSwapError(
-            new XRPCError(409, "InvalidSwap", "Commit was too old"),
-          ),
-        );
+        .mockResolvedValueOnce(spoilerRecordValue())
+        .mockRejectedValueOnce(new PdsRecordNotFoundError());
+      const applyWrites = vi.fn().mockRejectedValue(invalidSwap());
       const app = buildApp({
-        getAgent: vi
-          .fn()
-          .mockResolvedValue(fakeAgent({ repo: { getRecord, applyWrites } as never })),
+        reader: fakeReader({ getRecord }),
+        getWriter: vi.fn().mockResolvedValue(fakeWriter({ applyWrites })),
       });
       const token = generateCsrfToken(session.csrfSecret);
 
@@ -282,10 +250,10 @@ describe("manage routes", () => {
       expect(html).toContain("他の操作と競合したため削除できませんでした");
     });
 
-    it("SessionRevokedErrorなら / へリダイレクトする", async () => {
+    it("SessionRevokedError（書き込みAgent取得時）なら / へリダイレクトする", async () => {
       const { session, header } = loginCookie();
-      const getAgent = vi.fn().mockRejectedValue(new SessionRevokedError());
-      const app = buildApp({ getAgent });
+      const getWriter = vi.fn().mockRejectedValue(new SessionRevokedError());
+      const app = buildApp({ reader: fakeReader(), getWriter });
       const token = generateCsrfToken(session.csrfSecret);
 
       const res = await app.request("/manage/delete", {
@@ -301,14 +269,14 @@ describe("manage routes", () => {
 
   describe("GET /manage/deleted", () => {
     it("未ログインは / へリダイレクトする", async () => {
-      const app = buildApp({ getAgent: vi.fn() });
+      const app = buildApp({ reader: fakeReader(), getWriter: vi.fn() });
       const res = await app.request("/manage/deleted");
       expect(res.status).toBe(302);
     });
 
     it("ログイン済みなら固定の削除完了文言を表示する", async () => {
       const { header } = loginCookie();
-      const app = buildApp({ getAgent: vi.fn() });
+      const app = buildApp({ reader: fakeReader(), getWriter: vi.fn() });
 
       const res = await app.request("/manage/deleted", { headers: header });
 

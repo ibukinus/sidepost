@@ -7,6 +7,7 @@ import type { DidResolver, FetchFn } from "./did.js";
 import { createDidResolver } from "./did.js";
 import type { HandleResolver } from "./handle.js";
 import { createHandleResolver } from "./handle.js";
+import { buildGetRecordUrl } from "./pds-read.js";
 
 export type { FetchFn } from "./did.js";
 
@@ -70,9 +71,7 @@ export function createContentService(options: CreateContentServiceOptions = {}):
     collection: string,
     rkey: string,
   ): Promise<unknown | null> {
-    const url = `${pdsUrl.replace(/\/+$/, "")}/xrpc/com.atproto.repo.getRecord?repo=${encodeURIComponent(
-      did,
-    )}&collection=${encodeURIComponent(collection)}&rkey=${encodeURIComponent(rkey)}`;
+    const url = buildGetRecordUrl(pdsUrl, did, collection, rkey);
 
     let result: SafeFetchResult;
     try {

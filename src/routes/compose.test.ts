@@ -26,10 +26,22 @@ vi.mock("../services/spoiler-post.js", async (importOriginal) => {
 
 const { getAgentForDid, SessionRevokedError } = await import("../services/oauth.js");
 const { createSpoilerPost, SpoilerPostWriteError } = await import("../services/spoiler-post.js");
-const { composeRoute } = await import("./compose.js");
+const { createComposeRoutes } = await import("./compose.js");
+const { PdsRecordNotFoundError } = await import("../services/pds-read.js");
+type PdsReader = import("../services/pds-read.js").PdsReader;
 
 const DID = "did:plc:abcdefghijklmnopqrstuvwx";
 const ORIGIN = "https://skyseal.mp0.jp";
+
+/** 認証なし読み取り（PdsReader）のフェイク。/compose/done のレコード取得に使う。 */
+function fakeReader(overrides: Partial<PdsReader> = {}): PdsReader {
+  return {
+    listRecords: vi.fn().mockResolvedValue({ records: [] }),
+    getRecord: vi.fn().mockRejectedValue(new PdsRecordNotFoundError()),
+    getLatestCommit: vi.fn().mockResolvedValue({ cid: "bafycommit", rev: "1" }),
+    ...overrides,
+  };
+}
 
 function buildConfig(): Config {
   return {
@@ -42,7 +54,7 @@ function buildConfig(): Config {
   };
 }
 
-function buildApp(db: Database.Database): Hono<AppEnv> {
+function buildApp(db: Database.Database, reader: PdsReader = fakeReader()): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("config", buildConfig());
@@ -51,7 +63,7 @@ function buildApp(db: Database.Database): Hono<AppEnv> {
     c.set("oauthClient", {} as any);
     await next();
   });
-  app.route("/", composeRoute);
+  app.route("/", createComposeRoutes({ reader }));
   return app;
 }
 
@@ -227,39 +239,28 @@ describe("compose routes", () => {
     });
 
     it("レコードが取得できない場合は404", async () => {
-      const getRecord = vi.fn().mockRejectedValue(new Error("not found"));
-      vi.mocked(getAgentForDid).mockResolvedValue({
-        com: { atproto: { repo: { getRecord } } },
-        // biome-ignore lint/suspicious/noExplicitAny: テスト用のAgentダブル
-      } as any);
-
-      const app = buildApp(db);
+      const getRecord = vi.fn().mockRejectedValue(new PdsRecordNotFoundError());
+      const app = buildApp(db, fakeReader({ getRecord }));
       const res = await app.request("/compose/done/3labc0000000a", {
         headers: cookieHeader(session),
       });
       expect(res.status).toBe(404);
+      // 完了画面のレコード取得に認証付きAgentは使わない（認証なしreader経由）。
+      expect(getAgentForDid).not.toHaveBeenCalled();
     });
 
-    it("正常時は専用URLと案内投稿リンクを表示する", async () => {
+    it("正常時は専用URLと案内投稿リンクを表示する（認証なしreader経由）", async () => {
       const rkey = "3labc0000000a";
       const announcementRkey = "3labc0000000b";
       const secretText = "これは秘密の本文です";
       const getRecord = vi.fn().mockResolvedValue({
-        data: {
-          value: {
-            $type: "jp.mp0.skyseal.post",
-            text: secretText,
-            createdAt: "2026-07-04T00:00:00.000Z",
-            announcementRkey,
-          },
-        },
+        $type: "jp.mp0.skyseal.post",
+        text: secretText,
+        createdAt: "2026-07-04T00:00:00.000Z",
+        announcementRkey,
       });
-      vi.mocked(getAgentForDid).mockResolvedValue({
-        com: { atproto: { repo: { getRecord } } },
-        // biome-ignore lint/suspicious/noExplicitAny: テスト用のAgentダブル
-      } as any);
 
-      const app = buildApp(db);
+      const app = buildApp(db, fakeReader({ getRecord }));
       const res = await app.request(`/compose/done/${rkey}`, {
         headers: cookieHeader(session),
       });
@@ -270,11 +271,9 @@ describe("compose routes", () => {
       expect(body).toContain(`https://bsky.app/profile/${DID}/post/${announcementRkey}`);
       // 本文そのものはこの画面に表示しない。
       expect(body).not.toContain(secretText);
-      expect(getRecord).toHaveBeenCalledWith({
-        repo: DID,
-        collection: "jp.mp0.skyseal.post",
-        rkey,
-      });
+      // セッションのDIDに対して認証なしで取得する。
+      expect(getRecord).toHaveBeenCalledWith(DID, "jp.mp0.skyseal.post", rkey);
+      expect(getAgentForDid).not.toHaveBeenCalled();
     });
   });
 });

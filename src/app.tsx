@@ -6,14 +6,15 @@ import { jsxRenderer } from "hono/jsx-renderer";
 import type { Config } from "./config/index.js";
 import type { RateLimiter } from "./middleware/rate-limit.js";
 import { securityHeaders } from "./middleware/security-headers.js";
-import { composeRoute } from "./routes/compose.js";
+import { createComposeRoutes } from "./routes/compose.js";
 import type { ContentApi } from "./routes/content-api.js";
 import { homeRoute } from "./routes/home.js";
 import { legalRoute } from "./routes/legal.js";
 import { logoutRoute } from "./routes/logout.js";
-import { manageRoute } from "./routes/manage.js";
+import { createManageRoutes } from "./routes/manage.js";
 import { oauthRoute } from "./routes/oauth.js";
 import { createPostPageRoute } from "./routes/post-page.js";
+import type { PdsReader } from "./services/pds-read.js";
 import type { AppEnv } from "./types.js";
 import { Layout } from "./views/layout.js";
 
@@ -23,6 +24,8 @@ export interface CreateAppDeps {
   oauthClient: NodeOAuthClient;
   contentApi: ContentApi;
   rateLimiter: RateLimiter;
+  /** PDSからの認証なし読み取り。DID解決キャッシュを contentApi と共有する。 */
+  pdsReader: PdsReader;
 }
 
 export function createApp({
@@ -31,6 +34,7 @@ export function createApp({
   oauthClient,
   contentApi,
   rateLimiter,
+  pdsReader,
 }: CreateAppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -57,8 +61,8 @@ export function createApp({
   app.route("/", homeRoute);
   app.route("/", oauthRoute);
   app.route("/", logoutRoute);
-  app.route("/", composeRoute);
-  app.route("/", manageRoute);
+  app.route("/", createComposeRoutes({ reader: pdsReader }));
+  app.route("/", createManageRoutes({ reader: pdsReader }));
   app.route("/", legalRoute);
   app.route("/api/p", contentApi.routes);
   app.route(

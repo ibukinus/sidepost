@@ -4,8 +4,10 @@ import { ConfigError, loadConfig } from "./config/index.js";
 import { openDatabase } from "./db/index.js";
 import { createRateLimiter } from "./middleware/rate-limit.js";
 import { createContentApi } from "./routes/content-api.js";
+import { createDidResolver } from "./services/did.js";
 import { createOAuthClient } from "./services/oauth.js";
 import { deleteExpiredStates } from "./services/oauth-store.js";
+import { createPdsReader } from "./services/pds-read.js";
 import { deleteExpiredAppSessions } from "./services/session.js";
 
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
@@ -14,9 +16,12 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const db = openDatabase(config.dbPath);
   const oauthClient = await createOAuthClient(config, db);
-  const contentApi = createContentApi(config);
+  // DID解決キャッシュを本文取得API（contentApi）とPDS読み取り（pdsReader）で共有する。
+  const didResolver = createDidResolver();
+  const contentApi = createContentApi(config, { didResolver });
+  const pdsReader = createPdsReader({ didResolver });
   const rateLimiter = createRateLimiter();
-  const app = createApp({ config, db, oauthClient, contentApi, rateLimiter });
+  const app = createApp({ config, db, oauthClient, contentApi, rateLimiter, pdsReader });
 
   // 期限切れの一時state・アプリセッションを定期削除する（oauth-session.md 3.・5.）。
   const cleanupTimer = setInterval(() => {

@@ -6,6 +6,7 @@ import type { ContentService } from "../services/content.js";
 import { createContentService } from "../services/content.js";
 import type { DenylistService } from "../services/denylist.js";
 import { createDenylistService } from "../services/denylist.js";
+import type { DidResolver } from "../services/did.js";
 import { createDidResolver } from "../services/did.js";
 import { createHandleResolver } from "../services/handle.js";
 import type { AppEnv } from "../types.js";
@@ -89,14 +90,26 @@ export interface ContentApi {
   stop(): void;
 }
 
+export interface CreateContentApiOptions {
+  /**
+   * DID解決器。PDS読み取りサービス（pds-read）とキャッシュを一本化するため、
+   * 統括者が生成した共有インスタンスを注入できる。未指定なら内部生成する。
+   */
+  didResolver?: DidResolver;
+}
+
 /**
  * 本文取得APIの依存一式（DID解決・ハンドル解決・本文サービス・表示停止リスト）を
  * 組み立てて返す統合ファクトリ。統括者はこれ1つを呼び、`routes` をマウントし、
  * `denylist`・`content` を /p ページと共有すればよい。
+ * `didResolver` を渡すと、PDS読み取りサービスと解決結果キャッシュを共有できる。
  */
-export function createContentApi(config: Config): ContentApi {
+export function createContentApi(
+  config: Config,
+  options: CreateContentApiOptions = {},
+): ContentApi {
   const denylist = createDenylistService(config.denylistPath);
-  const didResolver = createDidResolver();
+  const didResolver = options.didResolver ?? createDidResolver();
   const handleResolver = createHandleResolver();
   const content = createContentService({ didResolver, handleResolver });
   const routes = createContentApiRoutes({ denylist, content });
