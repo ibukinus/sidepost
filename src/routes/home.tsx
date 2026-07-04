@@ -1,17 +1,18 @@
 import { Hono } from "hono";
+import { getAppSession, readSessionCookie } from "../services/session.js";
 import type { AppEnv } from "../types.js";
+import { Login } from "../views/login.js";
 
 /**
- * GET / は暫定プレースホルダ。Phase 2でログイン画面（ハンドル入力・OAuth開始）に置き換える。
+ * GET /（ログイン画面。screens.md 3.1）。
+ * ログイン済み（有効なアプリセッションを持つ）なら投稿画面 `/compose` へリダイレクトする。
  */
 export const homeRoute = new Hono<AppEnv>();
 
 homeRoute.get("/", (c) => {
-  return c.render(
-    <section>
-      <h1>skyseal</h1>
-      <p>準備中です。</p>
-    </section>,
-    { title: "ログイン" },
-  );
+  const sessionId = readSessionCookie(c);
+  if (sessionId && getAppSession(c.get("db"), sessionId)) {
+    return c.redirect("/compose", 302);
+  }
+  return c.render(<Login />, { title: "ログイン" });
 });
