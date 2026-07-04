@@ -164,3 +164,19 @@ a {
 .legal-article table tr:last-child td {
   border-bottom: none;
 }
+
+.page-header {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 0;
+}
+
+.logout-form button {
+  background: none;
+  border: 1px solid var(--skyseal-color-border);
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0.25rem 0.75rem;
+}

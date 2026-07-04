@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { requireAuth } from "../middleware/auth.js";
 import { csrfProtection } from "../middleware/csrf.js";
 import { deleteOAuthSession } from "../services/oauth-store.js";
-import { clearSessionCookie, deleteAppSession } from "../services/session.js";
+import { clearSessionCookie, deleteAppSessionsByDid } from "../services/session.js";
 import type { AppEnv } from "../types.js";
 
 /**
@@ -29,8 +29,10 @@ logoutRoute.post("/logout", requireAuth(), csrfProtection(), async (c) => {
   }
 
   // revoke が成功すればライブラリがセッションストアから削除するが、失敗時に備えて明示削除する。
+  // oauth_session はDID単位のため、同一DIDの他ブラウザのアプリセッションだけ残すと
+  // 「認証済みなのに書き込み不能」の宙吊り状態になる。DIDの全アプリセッションを削除する。
   deleteOAuthSession(db, session.did);
-  deleteAppSession(db, session.sessionId);
+  deleteAppSessionsByDid(db, session.did);
   clearSessionCookie(c);
   return c.redirect("/", 302);
 });

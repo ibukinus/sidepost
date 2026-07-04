@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config/index.js";
 import { openDatabase } from "./db/index.js";
+import { CSRF_FIELD_NAME, generateCsrfToken } from "./middleware/csrf.js";
 import { createRateLimiter } from "./middleware/rate-limit.js";
 import { createContentApi } from "./routes/content-api.js";
 import { createDidResolver } from "./services/did.js";
@@ -135,6 +136,51 @@ describe("createApp", () => {
     const res = await app.request("/logout", { method: "POST" });
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/");
+    db.close();
+  });
+
+  it("ログイン中の画面にはログアウトフォームが描画され、未ログイン画面には出ない", async () => {
+    const { app, db } = await buildApp();
+    const session = createAppSession(db, "did:plc:abc");
+
+    const authed = await app.request("/compose", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${session.sessionId}` },
+    });
+    expect(authed.status).toBe(200);
+    const authedBody = await authed.text();
+    expect(authedBody).toContain('action="/logout"');
+    expect(authedBody).toContain(`name="${CSRF_FIELD_NAME}"`);
+
+    const anonymous = await app.request("/");
+    expect(await anonymous.text()).not.toContain('action="/logout"');
+    db.close();
+  });
+
+  it("POST /logout は同一DIDの他のアプリセッションもすべて無効化する", async () => {
+    const { app, db } = await buildApp();
+    const did = "did:plc:abc";
+    const sessionA = createAppSession(db, did);
+    const sessionB = createAppSession(db, did);
+
+    const res = await app.request("/logout", {
+      method: "POST",
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${sessionA.sessionId}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        [CSRF_FIELD_NAME]: generateCsrfToken(sessionA.csrfSecret),
+      }),
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/");
+
+    // 別ブラウザのセッションBも失効している（認証必須ページは / へリダイレクト）。
+    const other = await app.request("/compose", {
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${sessionB.sessionId}` },
+    });
+    expect(other.status).toBe(302);
+    expect(other.headers.get("location")).toBe("/");
     db.close();
   });
 });

@@ -2,8 +2,9 @@ import type { NodeOAuthClient } from "@atproto/oauth-client-node";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
-import { jsxRenderer } from "hono/jsx-renderer";
+import { jsxRenderer, useRequestContext } from "hono/jsx-renderer";
 import type { Config } from "./config/index.js";
+import { generateCsrfToken } from "./middleware/csrf.js";
 import type { RateLimiter } from "./middleware/rate-limit.js";
 import { securityHeaders } from "./middleware/security-headers.js";
 import { createComposeRoutes } from "./routes/compose.js";
@@ -53,7 +54,18 @@ export function createApp({
 
   app.use(
     "*",
-    jsxRenderer(({ children, title }) => <Layout title={title}>{children}</Layout>),
+    jsxRenderer(({ children, title }) => {
+      // requireAuth を通過したルートではセッションが載っているので、共通レイアウトに
+      // ログアウトフォーム用のCSRFトークンを渡す（未ログイン画面では描画されない）。
+      const c = useRequestContext<AppEnv>();
+      const session = c.get("session") as AppEnv["Variables"]["session"] | undefined;
+      const logoutCsrfToken = session ? generateCsrfToken(session.csrfSecret) : undefined;
+      return (
+        <Layout title={title} logoutCsrfToken={logoutCsrfToken}>
+          {children}
+        </Layout>
+      );
+    }),
   );
 
   app.use("/assets/*", serveStatic({ root: "./public" }));
