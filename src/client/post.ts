@@ -10,6 +10,8 @@
  * 純関数としてexportし、単体テスト可能にしている。
  */
 
+import { encodeDidSegment } from "../lib/at-uri.js";
+
 export interface SpoilerAuthor {
   did: string;
   handle?: string;
@@ -216,9 +218,9 @@ async function init(doc: DocumentLike): Promise<void> {
 
   let state: PostViewState;
   try {
-    // did・rkeyはSSR側でatproto構文検証済みの値であり、URL区切り文字を含まないため
-    // そのままパスセグメントとして組み立てる。
-    const res = await fetch(`/api/p/${did}/${rkey}`, {
+    // did:web は `%3A` 等のパーセントエンコードを含み得るため、パスセグメントとして
+    // 再エンコードしないとサーバー側のデコードで別のDID文字列になる。
+    const res = await fetch(`/api/p/${encodeDidSegment(did)}/${rkey}`, {
       headers: { accept: "application/json" },
     });
     state = await classifyResponse(res);

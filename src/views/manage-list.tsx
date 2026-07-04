@@ -1,3 +1,4 @@
+import { encodeDidSegment } from "../lib/at-uri.js";
 import { CSRF_FIELD_NAME } from "../middleware/csrf.js";
 import type { SpoilerListItem } from "../services/manage.js";
 
@@ -50,7 +51,7 @@ export function ManageList({ did, items, nextCursor, csrfToken, error }: ManageL
               </time>
               <p class="manage-item-excerpt">{item.excerpt}</p>
               <p class="manage-item-actions">
-                <a href={`/p/${did}/${item.rkey}`}>専用ページ</a>{" "}
+                <a href={`/p/${encodeDidSegment(did)}/${item.rkey}`}>専用ページ</a>{" "}
                 <button type="button" popovertarget={`manage-confirm-${item.rkey}`}>
                   削除
                 </button>

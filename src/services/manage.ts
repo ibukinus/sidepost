@@ -1,10 +1,12 @@
 import type { Agent } from "@atproto/api";
 import { ComAtprotoRepoApplyWrites, ComAtprotoRepoGetRecord } from "@atproto/api";
+import { buildDedicatedUrl } from "../lib/at-uri.js";
 import { isValidRecordKey } from "../lib/atproto-syntax.js";
 import { validateSpoilerRecord } from "./content.js";
+import { buildAnnouncementText } from "./spoiler-post.js";
 
 /**
- * 投稿管理・削除の中核処理（screens.md 3.5・3.6・4.2、lexicon.md 4.2）。
+ * 投稿管理・削除の中核処理（screens.md 3.5・3.6・4.2、lexicon.md 2.）。
  *
  * PDSアクセスは `RepoAgent`（`@atproto/api` の `Agent` の必要最小限の部分集合）経由で行う。
  * 本文はレスポンスの一覧表示用抜粋以外は保持・ログ出力しない（要件7.1・7.2）。
@@ -161,16 +163,14 @@ export async function listSpoilerPosts(
   return page;
 }
 
-/** 専用ページURLを構築する（ドメインをハードコードせず `config.origin` から導出。要件3.2）。 */
-export function buildDedicatedUrl(origin: string, did: string, rkey: string): string {
-  return `${origin}/p/${did}/${rkey}`;
-}
+export { buildDedicatedUrl };
 
 /**
  * 案内投稿レコードが、skysealが生成した固定テンプレート（lexicon.md 2.）に一致するかを検証する。
  * `$type` と本文全体（固定文言＋対象本文レコードの専用URL）の完全一致のみを条件とする。
  * 一致しないものは、投稿者本人や他アプリが作成した無関係な投稿である可能性があるため、
- * 削除対象に含めない（lexicon.md 4.2 手順2）。
+ * 削除対象に含めない（screens.md 4.2 手順2）。
+ * 期待文字列は作成側（spoiler-post.ts）と同じ関数で構築し、乖離を防ぐ。
  */
 export function isMatchingAnnouncement(
   value: unknown,
@@ -188,7 +188,7 @@ export function isMatchingAnnouncement(
   if (typeof record.text !== "string") {
     return false;
   }
-  const expectedText = `ネタバレを含む投稿です。\n\n${buildDedicatedUrl(origin, did, rkey)}`;
+  const expectedText = buildAnnouncementText(buildDedicatedUrl(origin, did, rkey));
   return record.text === expectedText;
 }
 
@@ -204,7 +204,7 @@ export interface DeleteSpoilerPostParams {
 }
 
 /**
- * 削除処理（lexicon.md 4.2）。
+ * 削除処理（screens.md 4.2）。
  *
  * 1. リポジトリの現在のコミットCIDを観測する（`swapCommit` の基準。TOCTOU対策）。
  *    これ以降の読み取り内容が正しく反映されるよう、読み取りより先に取得する
@@ -226,7 +226,7 @@ export async function deleteSpoilerPost(
     return { ok: false, reason: "invalid-rkey" };
   }
 
-  // TOCTOU対策（lexicon.md 4.2 手順4）: これから行う読み取り（本文・案内投稿の確認）より
+  // TOCTOU対策（screens.md 4.2 手順4）: これから行う読み取り（本文・案内投稿の確認）より
   // 前にリポジトリのコミットCIDを観測する。読み取り後に観測すると、読み取りとほぼ同時に
   // 発生した変更がswapCommitの基準に取り込まれてしまい、applyWritesの競合検出が
   // 読み取り自体の間に起きた変化を見逃す（チェック自体が無意味になる）ため、必ず先に取得する。
@@ -248,7 +248,7 @@ export async function deleteSpoilerPost(
     spoilerValue = res.data.value;
   } catch (err) {
     if (isRecordNotFound(err)) {
-      // すでに削除済み（lexicon.md 4.2 手順1）。
+      // すでに削除済み（screens.md 4.2 手順1）。
       return { ok: true };
     }
     return { ok: false, reason: "pds-error" };
@@ -274,7 +274,7 @@ export async function deleteSpoilerPost(
         // announcementRkeyの手がかりを失うため）。フォールバックせず明確に失敗させる。
         return { ok: false, reason: "pds-error" };
       }
-      // 案内投稿がすでに手動削除されている → 本文レコードのみ削除する（lexicon.md 4.2 手順3）。
+      // 案内投稿がすでに手動削除されている → 本文レコードのみ削除する（screens.md 4.2 手順3）。
       announcementMatched = false;
     }
   }

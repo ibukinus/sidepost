@@ -36,6 +36,16 @@ const defaultDeps: ManageRoutesDeps = {
 export function createManageRoutes(deps: ManageRoutesDeps = defaultDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  // 一覧に本文抜粋を含むため、共有・中間キャッシュへの残留を防ぐ（要件7.2の安全側運用）。
+  app.use("/manage/*", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
+  app.use("/manage", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
+
   app.get("/manage", requireAuth(), async (c) => {
     const session = c.get("session");
     const cursorParam = c.req.query("cursor");

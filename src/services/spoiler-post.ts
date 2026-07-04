@@ -1,6 +1,9 @@
 import type { Agent, ComAtprotoRepoApplyWrites } from "@atproto/api";
+import { buildDedicatedUrl } from "../lib/at-uri.js";
 import { isValidRecordKey, utf8ByteLength } from "../lib/atproto-syntax.js";
 import { nextTid } from "../lib/tid.js";
+
+export { buildDedicatedUrl };
 
 /**
  * 投稿作成処理（screens.md 4.1、lexicon.md、要件6.2・6.4・6.5）。
@@ -37,11 +40,6 @@ export function validateComposeText(text: string): ComposeValidationError | null
     return "too-long";
   }
   return null;
-}
-
-/** 専用ページURLを組み立てる（要件3.2、lexicon.md 1.）。 */
-export function buildDedicatedUrl(origin: string, did: string, rkeyPost: string): string {
-  return `${origin}/p/${did}/${rkeyPost}`;
 }
 
 /** 案内投稿の本文テキスト（lexicon.md 2.）。 */
