@@ -2,6 +2,7 @@ import type { NodeOAuthClient } from "@atproto/oauth-client-node";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { jsxRenderer, useRequestContext } from "hono/jsx-renderer";
 import type { Config } from "./config/index.js";
 import { generateCsrfToken } from "./middleware/csrf.js";
@@ -47,6 +48,11 @@ export function createApp({
   });
 
   app.use("*", securityHeaders());
+
+  // 全POSTのボディ上限。最大の正当なボディはcomposeの本文（7,500バイトの
+  // URLエンコードで最大約23KB）+CSRF等のため、64KBで十分な余裕がある。
+  // 未認証の /oauth/login を含め、検証前の巨大ボディのバッファリングを防ぐ。
+  app.use("*", bodyLimit({ maxSize: 64 * 1024 }));
 
   // /p/* と /api/p/* は同一インスタンスで合算レート制限する（content-api.md 5.）。
   app.use("/p/*", rateLimiter.middleware);

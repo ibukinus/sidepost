@@ -119,6 +119,17 @@ describe("createApp", () => {
     db.close();
   });
 
+  it("64KBを超えるPOSTボディは413で拒否する", async () => {
+    const { app, db } = await buildApp();
+    const res = await app.request("/oauth/login", {
+      method: "POST",
+      body: new URLSearchParams({ handle: "a".repeat(70 * 1024) }),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+    });
+    expect(res.status).toBe(413);
+    db.close();
+  });
+
   it("POST /oauth/login は空ハンドルでエラーを表示する", async () => {
     const { app, db } = await buildApp();
     const res = await app.request("/oauth/login", {
