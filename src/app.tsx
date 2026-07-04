@@ -6,10 +6,14 @@ import { jsxRenderer } from "hono/jsx-renderer";
 import type { Config } from "./config/index.js";
 import type { RateLimiter } from "./middleware/rate-limit.js";
 import { securityHeaders } from "./middleware/security-headers.js";
+import { composeRoute } from "./routes/compose.js";
 import type { ContentApi } from "./routes/content-api.js";
 import { homeRoute } from "./routes/home.js";
+import { legalRoute } from "./routes/legal.js";
 import { logoutRoute } from "./routes/logout.js";
+import { manageRoute } from "./routes/manage.js";
 import { oauthRoute } from "./routes/oauth.js";
+import { createPostPageRoute } from "./routes/post-page.js";
 import type { AppEnv } from "./types.js";
 import { Layout } from "./views/layout.js";
 
@@ -53,7 +57,14 @@ export function createApp({
   app.route("/", homeRoute);
   app.route("/", oauthRoute);
   app.route("/", logoutRoute);
+  app.route("/", composeRoute);
+  app.route("/", manageRoute);
+  app.route("/", legalRoute);
   app.route("/api/p", contentApi.routes);
+  app.route(
+    "/p",
+    createPostPageRoute({ denylist: contentApi.denylist, content: contentApi.content }),
+  );
 
   return app;
 }
