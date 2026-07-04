@@ -1,0 +1,36 @@
+{
+  "name": "skyseal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bluesky上でネタバレ本文を通常投稿から分離するサービス",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "npm run build:client && tsx watch src/index.ts",
+    "build": "npm run build:client && npm run build:server",
+    "build:server": "tsc -p tsconfig.json",
+    "build:client": "esbuild src/client/main.ts src/client/compose.ts src/client/post.ts --bundle --outdir=public/assets/js --format=esm --target=es2022",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "lint": "biome check .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@atproto/api": "^0.20.25",
+    "@atproto/oauth-client-node": "^0.4.5",
+    "@hono/node-server": "^2.0.8",
+    "better-sqlite3": "^12.11.1",
+    "hono": "^4.12.27"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^26.1.0",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

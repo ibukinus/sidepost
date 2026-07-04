@@ -1,0 +1,12 @@
+node_modules/
+dist/
+public/assets/js/
+*.log
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+coverage/
+.DS_Store

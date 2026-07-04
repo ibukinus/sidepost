@@ -1,0 +1,47 @@
+/*
+ * 投稿表示画面（/p/{did}/{rkey}）専用スタイル。
+ * 共通スタイル（style.css）のデザイントークンを利用する。
+ * style.cssはPhase 1所有のため編集せず、専用ページ分だけ新規ファイルとして追加する。
+ */
+
+.post-status {
+  color: var(--skyseal-color-text-muted);
+}
+
+.post-body .spoiler-text {
+  margin: 0 0 1.5rem;
+  font-size: 1.05rem;
+}
+
+.post-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0 0 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--skyseal-color-border);
+  border-radius: 0.5rem;
+  background-color: var(--skyseal-color-surface);
+}
+
+.post-meta-row {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.post-meta-row dt {
+  flex: none;
+  width: 5.5rem;
+  color: var(--skyseal-color-text-muted);
+  font-weight: normal;
+}
+
+.post-meta-row dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.post-announcement-link {
+  margin: 0;
+}
