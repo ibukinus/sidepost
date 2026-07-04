@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config/index.js";
 import { openDatabase } from "./db/index.js";
+import { createRateLimiter } from "./middleware/rate-limit.js";
+import { createContentApi } from "./routes/content-api.js";
 import { createOAuthClient } from "./services/oauth.js";
 import { createAppSession, SESSION_COOKIE_NAME } from "./services/session.js";
 
@@ -21,6 +23,7 @@ const TEST_PRIVATE_JWK = {
 
 describe("createApp", () => {
   let tmpDir: string;
+  let cleanups: Array<() => void>;
 
   async function buildApp() {
     fs.writeFileSync(path.join(tmpDir, "denylist.json"), JSON.stringify({ dids: [], records: [] }));
@@ -33,14 +36,22 @@ describe("createApp", () => {
     });
     const db = openDatabase(path.join(tmpDir, "skyseal.db"));
     const oauthClient = await createOAuthClient(config, db);
-    return { app: createApp({ config, db, oauthClient }), db };
+    const contentApi = createContentApi(config);
+    const rateLimiter = createRateLimiter();
+    cleanups.push(() => {
+      contentApi.stop();
+      rateLimiter.stop();
+    });
+    return { app: createApp({ config, db, oauthClient, contentApi, rateLimiter }), db };
   }
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "skyseal-app-test-"));
+    cleanups = [];
   });
 
   afterEach(() => {
+    for (const cleanup of cleanups) cleanup();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 

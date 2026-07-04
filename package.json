@@ -11,7 +11,7 @@
     "dev": "npm run build:client && tsx watch src/index.ts",
     "build": "npm run build:client && npm run build:server",
     "build:server": "tsc -p tsconfig.json",
-    "build:client": "esbuild src/client/main.ts --bundle --outfile=public/assets/js/main.js --format=esm --target=es2022",
+    "build:client": "esbuild src/client/*.ts --bundle --outdir=public/assets/js --format=esm --target=es2022",
     "start": "node dist/index.js",
     "test": "vitest run",
     "lint": "biome check .",
